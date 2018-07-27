@@ -1,96 +1,178 @@
-# [React](http://facebook.github.io/react)
+### react 源码学习笔记
+#### 准备工作
+刚开始没有看老师给的[文档](https://www.yuque.com/ant-h5/react/xmb111),傻乎乎的下载了react-16，死活找不到源码入口，感谢老师的整理；
+从文档里的准备工作可以知道我们要从最早的稳定版v0.3.0学起，通过git命令切换版本。
+```
+$ git clone https://github.com/facebook/react.git
+$ git checkout 0.3-stable
+$ git checkout v0.3.0
+```
+由于老师的文档已经非常清晰了，我就不再赘述，只是记录一下自己在学习过程中不理解的地方；
 
-React is a JavaScript library for building user interfaces.
+#### React.createClass
+##### createClass 使用
 
-* **Declarative:** React uses a declarative paradigm that makes it easier to reason about your application.
-* **Efficient:** React minimizes interactions with the DOM by using a mock representation of the DOM.
-* **Flexible:** React works with the libraries and frameworks that you already know.
-
-[Learn how to use React in your own project.](http://facebook.github.io/docs/getting-started.html)
-
-## Examples
-
-We have several examples [on the website](http://facebook.github.io/react). Here is the first one to get you started:
-
-```js
-/** @jsx React.DOM */
-var HelloMessage = React.createClass({
-  render: function() {
-    return <div>{'Hello ' + this.props.name}</div>;
-  }
+```javascript
+var ExampleApplication = React.createClass({
+    getInitialState() {
+        return {}
+    }, 
+    
+    componentWillMount() {
+    },
+    
+    componentDidMount() {
+    },
+    
+    render: function() {
+        return <div>hello world</div>
+    }
 });
-
 React.renderComponent(
-  <HelloMessage name="John" />,
+  ExampleApplication({elapsed: new Date().getTime() - start}),
   document.getElementById('container')
 );
 ```
 
-This example will render "Hello John" into a container on the page.
+##### createClass 源码
 
-You'll notice that we used an XML-like syntax; [we call it JSX](http://facebook.github.io/docs/syntax.html). JSX is not required to use React, but it makes code more readable, and writing it feels like writing HTML. A simple transform is included with React that allows converting JSX into native JavaScript for browsers to digest.
+```javascript
+createClass: function (spec) {
+    var Constructor = function (initialProps, children) {
+      this.construct(initialProps, children);
+    };
+    // Constructor 的原形指向 ReactCompositeComponentBase 的实例 
+    // 相当于完全删除了 Constructor.prototype 对象原先的值,赋予一个新值
+    // 即所有 Constructor 的实例可以继承 ReactCompositeComponentBase
+    // 此时 Constructor.prototype.constructor 是指向 ReactCompositeComponentBase 的
+    Constructor.prototype = new ReactCompositeComponentBase();
+    // 把 Constructor 的原型的 constructor 重新指向 Constructor 否则会导致继承链的紊乱
+    Constructor.prototype.constructor = Constructor;
+    mixSpecIntoComponent(Constructor, spec);
+    // invariant 断言
+    invariant(
+      Constructor.prototype.render, // 这里的render是ReactCompositeComponentBase的render
+      'createClass(...): Class specification must implement a `render` method.'
+    );
+    var ConvenienceConstructor = function (props, children) {
+      // 返回 Constructor 的实例
+      return new Constructor(props, children);
+    };
+    // ConvenienceConstructor 上添加一个 componentConstructor 属性指向 Constructor
+    ConvenienceConstructor.componentConstructor = Constructor;
+    // 给 ConvenienceConstructor 的 originalSpec 赋值
+    ConvenienceConstructor.originalSpec = spec;
+    // 返回 ConvenienceConstructor 
+    // 并且注意 每一个 ConvenienceConstructor 的返回的Constructor都是一个新的实例
+    return ConvenienceConstructor;
+}
+// 所以createClass生成的是一个类组件 
 
-## Installation
+construct: function (initialProps, children) {
+    this.props = initialProps || {};
+    if (typeof children !== 'undefined') {
+        this.props.children = children;
+    }
+    // Record the component responsible for creating this component.
+    this.props[OWNER] = ReactCurrentOwner.current;
+    // All components start unmounted.
+    this._lifeCycleState = ComponentLifeCycle.UNMOUNTED;
+}
+```
+##### renderComponent 使用
 
-The fastest way to get started is to serve JavaScript from the CDN:
-
-```html
-<!-- The core React library -->
-<script src="http://fbcdn.com/javascript/react/0.6.0/react.min.js"></script>
-<!-- In-browser JSX transformer, remove when pre-compiling JSX. -->
-<script src="http://fbcdn.com/javascript/react/0.6.0/JSXTransformer.js"></script>
+renderComponent(component, container)负责将一个component实例渲染到给定的container中。
+```javascript
+React.renderComponent(
+  ExampleApplication({elapsed: new Date().getTime() - start}),
+  document.getElementById('container')
+);
 ```
 
-We've also built a [starter kit](#) which might be useful if this is your first time using React. It includes a webpage with an example of using React with live code.
+##### renderComponent 源码
 
-If you'd like to use [bower](http://bower.io), it's as easy as:
+```javascript
+  // 获取根结点id
+  function getReactRootID(container) {
+    return container.firstChild && container.firstChild.id;
+  },
+  // 滚动条监听
+  scrollMonitor: function(container, renderCallback) {
+    renderCallback();
+  },
+  getReactRootIDFromNodeID: function(id) {
+    var regexResult = /\.reactRoot\[[^\]]+\]/.exec(id);
+    return regexResult && regexResult[0];
+  },
+  // 注册组件id
+  registerContainer: function(container) {
+    var reactRootID = getReactRootID(container);
+    // 这里判断reactRootID是判断没有关联组件的这个container是否有id属性
+    if (reactRootID) {
+      // 如果container有id，则通过getReactRootIDFromNodeID判断是否是reactRoot
+      // If one exists, make sure it is a valid "reactRoot" ID.
+      reactRootID = ReactInstanceHandles.getReactRootIDFromNodeID(reactRootID);
+    }
+    if (!reactRootID) {
+      // 如果不是根节点则进行创建
+      // No valid "reactRoot" ID found, create one.
+      reactRootID = ReactInstanceHandles.getReactRootID(
+        globalMountPointCounter++
+      );
+    }
+    containersByReactRootID[reactRootID] = container;
+    return reactRootID;
+  },
+  renderComponent: function(nextComponent, container) {
+    // 先判断与该container关联的Component是否存在
+    var prevComponent = instanceByReactRootID[getReactRootID(container)];
+    // 如果与该container关联的 Component 存在,直接替换props后返回该 Component
+    if (prevComponent) {  
+      var nextProps = nextComponent.props;
+      // 保持滚动条不变   **这里不懂怎么保持滚动条不变的**
+      ReactMount.scrollMonitor(container, function() {
+        prevComponent.replaceProps(nextProps);
+      });
+      return prevComponent;
+    }
+    // 挂载事件
+    ReactMount.prepareTopLevelEvents(ReactEventTopLevelCallback);
+    // 如果与该container关联的 Component 不存在, 注册组件id并记录在instanceByReactRootID中
+    var reactRootID = ReactMount.registerContainer(container);
+    instanceByReactRootID[reactRootID] = nextComponent;
+    nextComponent.mountComponentIntoNode(reactRootID, container);
+    return nextComponent;
+  }
 
-```sh
-bower install react
+```
+##### mountComponentIntoNode 使用 todo
+
+```javascript
+nextComponent.mountComponentIntoNode(reactRootID, container);
 ```
 
-## Contribute
+##### mountComponentIntoNode 源码
 
-The main purpose of this repository is to continue to evolve React core, making it faster and easier to use. If you're interested in helping with that, then keep reading. If you're not interested in helping right now that's ok too :) Any feedback you have about using React would be greatly appreciated.
-
-### Building Your Copy of React
-
-The process to build `react.js` is built entirely on top of node.js, using many libraries you may already be familiar with.
-
-#### Prerequisites
-
-* You have `node` installed at v0.10.0+ (it might work at lower versions, we just haven't tested).
-* You are familiar with `npm` and know whether or not you need to use `sudo` when installing packages globally.
-* You are familiar with `git`.
-
-#### Build
-
-Once you have the repository cloned, building a copy of `react.js` is really easy.
-
-```sh
-# grunt-cli is needed by grunt; you might have this installed already
-npm install -g grunt-cli
-npm install
-grunt build
+```javascript
+mountComponentIntoNode: function(rootID, container) {
+      var transaction = ReactComponent.ReactReconcileTransaction.getPooled();
+      transaction.perform(
+        this._mountComponentIntoNode,
+        this,
+        rootID,
+        container,
+        transaction
+      );
+      ReactComponent.ReactReconcileTransaction.release(transaction);
+    },
 ```
 
-At this point, you should now have a `build/` directory populated with everything you need to use React. The examples should all work.
 
-### Grunt
-
-We use grunt to automate many tasks. Run `grunt -h` to see a mostly complete listing. The important ones to know:
-
-```sh
-# Create test build & run tests with PhantomJS
-grunt test
-# Lint the core library code with JSHint
-grunt lint
-# Lint package code
-grunt lint:package
-# Wipe out build directory
-grunt clean
-```
-
-### More…
-
-There's only so much we can cram in here. To read more about the community and guidelines for submitting pull requests, please read the [Contributing document](CONTRIBUTING.md).
+Recently tired, the workload is not heavy, but I am always very tired.
+We haven't been connected for a week.
+/*
+ * @Author: beth.miao 
+ * @Date: 2018-07-27 16:59:50 
+ * @Last Modified by: beth.miao
+ * @Last Modified time: 2018-07-27 19:26:37
+ */
